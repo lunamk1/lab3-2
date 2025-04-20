@@ -20,14 +20,14 @@ def mask_tokens(input_ids, vocab_size, mask_token_id, pad_token_id, mlm_prob=0.1
     """
     labels = input_ids.clone()
 
-    # Create a mask selecting tokens to mask
+    # create a mask selecting tokens to mask
     probability_matrix = torch.full(labels.shape, mlm_prob)
     special_tokens_mask = (input_ids == pad_token_id)
     probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
 
     masked_indices = torch.bernoulli(probability_matrix).bool()
 
-    labels[~masked_indices] = -100  # only compute loss on masked tokens (ignore non-masked)
+    labels[~masked_indices] = -100  # only compute loss on masked tokens and ignore non-masked
 
     # 80% of the time: replace masked tokens with [MASK]
     indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
@@ -38,14 +38,9 @@ def mask_tokens(input_ids, vocab_size, mask_token_id, pad_token_id, mlm_prob=0.1
     random_words = torch.randint(vocab_size, labels.shape, dtype=torch.long, device=input_ids.device)
     input_ids[indices_random] = random_words[indices_random]
 
-    # Remaining 10%: keep original token
+    # remaining 10%: keep original token
 
     return input_ids, labels
-
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import matplotlib.pyplot as plt
 
 def train_bert(model, dataloader, tokenizer, epochs=3, lr=5e-4, device='cuda'):
     """
@@ -55,9 +50,8 @@ def train_bert(model, dataloader, tokenizer, epochs=3, lr=5e-4, device='cuda'):
         model (nn.Module): The encoder model.
         dataloader (DataLoader): DataLoader for training data.
         tokenizer (Tokenizer): Tokenizer (for special token IDs).
-        epochs (int, optional): Number of epochs. Defaults to 3.
-        lr (float, optional): Learning rate. Defaults to 5e-4.
-        device (str, optional): Device to train on ('cuda' or 'cpu'). Defaults to 'cuda'.
+        epochs (int): Number of epochs. Defaults to 3.
+        lr (float): Learning rate. Defaults to 5e-4.
     """
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -79,23 +73,23 @@ def train_bert(model, dataloader, tokenizer, epochs=3, lr=5e-4, device='cuda'):
             token_type_ids = batch['token_type_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
 
-            # Prepare masked inputs and labels
+            # prepare masked inputs and labels
             masked_input_ids, labels = mask_tokens(input_ids.clone(), vocab_size, mask_token_id, pad_token_id)
 
             masked_input_ids = masked_input_ids.to(device)
             labels = labels.to(device)
 
-            # Forward pass
+            # forward pass
             hidden_states = model(masked_input_ids, token_type_ids, attention_mask)
             logits = model.mlm_head(hidden_states)
 
-            # Reshape logits and labels for loss computation
+            # reshape logits and labels for loss computation
             logits = logits.view(-1, logits.size(-1))   # [batch_size * seq_len, vocab_size]
             labels = labels.view(-1)                    # [batch_size * seq_len]
 
             loss = loss_fn(logits, labels)
 
-            # Backward and optimize
+            # backward and optimize
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -107,7 +101,7 @@ def train_bert(model, dataloader, tokenizer, epochs=3, lr=5e-4, device='cuda'):
 
         print(f"Epoch [{epoch+1}/{epochs}], Loss: {avg_loss:.4f}")
 
-    # Plot the loss curve
+    # loss curve
     plt.plot(range(1, epochs+1), train_losses, marker='o')
     plt.xlabel('Epoch')
     plt.ylabel('Training Loss')
