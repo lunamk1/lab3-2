@@ -28,12 +28,11 @@ class MultiHeadSelfAttention(nn.Module):
             Tensor: Output after applying multi-head attention.
         """
         if mask is not None:
-            if mask.dim() == 2:
-                key_padding_mask = ~mask.bool()
-            elif mask.dim() == 3:
-                key_padding_mask = ~mask.squeeze(1).bool()
-            else:
-                raise ValueError("Invalid attention mask shape.")
+            while mask.ndim > 2:
+                mask = mask.squeeze(1)
+
+            key_padding_mask = ~mask.bool()
+    
         else:
             key_padding_mask = None
 
