@@ -3,19 +3,51 @@ import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 
+# def mask_tokens(input_ids, vocab_size, mask_token_id, pad_token_id, mlm_prob=0.15):
+#     labels = input_ids.clone()
+#     probability_matrix = torch.full(labels.shape, mlm_prob)
+#     special_tokens_mask = (input_ids == pad_token_id)
+#     probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
+#     masked_indices = torch.bernoulli(probability_matrix).bool()
+#     labels[~masked_indices] = -100
+#     indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
+#     input_ids[indices_replaced] = mask_token_id
+#     indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+#     random_words = torch.randint(vocab_size, labels.shape, dtype=torch.long, device=input_ids.device)
+#     input_ids[indices_random] = random_words[indices_random]
+#     return input_ids, labels
+
 def mask_tokens(input_ids, vocab_size, mask_token_id, pad_token_id, mlm_prob=0.15):
     labels = input_ids.clone()
-    probability_matrix = torch.full(labels.shape, mlm_prob)
-    special_tokens_mask = (input_ids == pad_token_id)
+
+    # create probability matrix on same device as input_ids
+    probability_matrix = torch.full(labels.shape, mlm_prob, device=input_ids.device)
+    # put special tokens mask on same device
+    special_tokens_mask = (input_ids == pad_token_id).to(input_ids.device)
     probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
+
     masked_indices = torch.bernoulli(probability_matrix).bool()
-    labels[~masked_indices] = -100
-    indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
+
+    labels[~masked_indices] = -100  # Only compute loss on masked tokens
+
+    # 80% of the time: replace masked tokens with [MASK]
+    indices_replaced = torch.bernoulli(
+        torch.full(labels.shape, 0.8, device=input_ids.device)
+    ).bool() & masked_indices
     input_ids[indices_replaced] = mask_token_id
-    indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-    random_words = torch.randint(vocab_size, labels.shape, dtype=torch.long, device=input_ids.device)
+    # 10% of the time: replace masked tokens with random word
+    indices_random = torch.bernoulli(
+        torch.full(labels.shape, 0.5, device=input_ids.device)
+    ).bool() & masked_indices & ~indices_replaced
+    random_words = torch.randint(
+        vocab_size, labels.shape, dtype=torch.long, device=input_ids.device
+    )
     input_ids[indices_random] = random_words[indices_random]
+
+    # 10% keep original token (handled automatically by not changing input_ids)
+
     return input_ids, labels
+
 
 def train_bert(model, dataloader, tokenizer, epochs=3, lr=5e-4, device='cuda'):
     model = model.to(device)
