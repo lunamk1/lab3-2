@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
+
 
 # def mask_tokens(input_ids, vocab_size, mask_token_id, pad_token_id, mlm_prob=0.15):
 #     labels = input_ids.clone()
@@ -49,7 +51,7 @@ def mask_tokens(input_ids, vocab_size, mask_token_id, pad_token_id, mlm_prob=0.1
     return input_ids, labels
 
 
-def train_bert(model, dataloader, tokenizer, epochs=3, lr=5e-4, device='cuda'):
+def train_bert(model, dataloader, tokenizer, val_split = 0.1, epochs=3, lr=5e-4, device='cuda'):
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.CrossEntropyLoss()
@@ -58,17 +60,34 @@ def train_bert(model, dataloader, tokenizer, epochs=3, lr=5e-4, device='cuda'):
     mask_token_id = tokenizer.mask_token_id
     pad_token_id = tokenizer.pad_token_id
 
-    model.train()
+    # ===========================
+    # Split the dataloader's dataset into train and validation
+    # ===========================
+    dataset = dataloader.dataset
+    train_size = int((1 - val_split) * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+
+    train_dataloader = DataLoader(train_dataset, batch_size=dataloader.batch_size, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=dataloader.batch_size, shuffle=False)
+
+    train_losses = []
+    val_losses = []
+
+
     train_losses = []
 
     for epoch in range(epochs):
-        epoch_loss = 0
-        for batch in dataloader:
+        model.train()
+        epoch_train_loss = 0
+        
+        
+        for batch in train_dataloader:
             input_ids = batch['input_ids'].to(device)
             token_type_ids = batch['token_type_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
 
-            # ✅ 确保 attention_mask 是 [batch, seq_len] 且类型为 bool
+
             if attention_mask.ndim == 3:
                 attention_mask = attention_mask.squeeze(1)
             attention_mask = attention_mask.bool()
@@ -93,15 +112,55 @@ def train_bert(model, dataloader, tokenizer, epochs=3, lr=5e-4, device='cuda'):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item()
+            epoch_train_loss += loss.item()
 
-        avg_loss = epoch_loss / len(dataloader)
-        train_losses.append(avg_loss)
-        print(f"Epoch [{epoch+1}/{epochs}], Loss: {avg_loss:.4f}")
+        avg_train_loss = epoch_train_loss / len(train_dataloader)
+        train_losses.append(avg_train_loss)
 
-    plt.plot(range(1, epochs+1), train_losses, marker='o')
-    plt.xlabel('Epoch')
-    plt.ylabel('Training Loss')
-    plt.title('Training Loss Curve')
-    plt.grid()
-    plt.show()
+        # ===== Validation =====
+        model.eval()
+        epoch_val_loss = 0
+
+        with torch.no_grad():
+            for batch in val_dataloader:
+                input_ids = batch['input_ids'].to(device)
+                token_type_ids = batch['token_type_ids'].to(device)
+                attention_mask = batch['attention_mask'].to(device)
+
+                if attention_mask.ndim == 3:
+                    attention_mask = attention_mask.squeeze(1)
+                attention_mask = attention_mask.bool()
+
+                masked_input_ids, labels = mask_tokens(
+                    input_ids,
+                    vocab_size=vocab_size,
+                    mask_token_id=mask_token_id,
+                    pad_token_id=pad_token_id,
+                    mlm_prob=0.15
+                )
+                masked_input_ids = masked_input_ids.to(device)
+                labels = labels.to(device)
+
+                hidden_states = model(masked_input_ids, token_type_ids, attention_mask)
+                logits = model.mlm_head(hidden_states)
+
+                logits = logits.view(-1, logits.size(-1))
+                labels = labels.view(-1)
+                loss = loss_fn(logits, labels)
+
+                epoch_val_loss += loss.item()
+
+        avg_val_loss = epoch_val_loss / len(val_dataloader)
+        val_losses.append(avg_val_loss)
+
+        
+        print(f"Epoch [{epoch+1}/{epochs}], Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
+
+    return train_losses, val_losses
+
+    # plt.plot(range(1, epochs+1), train_losses, marker='o')
+    # plt.xlabel('Epoch')
+    # plt.ylabel('Training Loss')
+    # plt.title('Training Loss Curve')
+    # plt.grid()
+    # plt.show()
